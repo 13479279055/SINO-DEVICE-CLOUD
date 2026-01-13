@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>云端设备预约系统 - 完整增强版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+
+        // ==========================================
+        // 🔥 你的 Firebase 配置
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyD3HFJZ7aJOQ7lKjKfkcWqkF3fc98HKBU4",
+            authDomain: "sino-device-cloud.firebaseapp.com",
+            projectId: "sino-device-cloud",
+            storageBucket: "sino-device-cloud.firebasestorage.app",
+            messagingSenderId: "898372256592",
+            appId: "1:898372256592:web:854498445d6aa490192255"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
+
+        let currentUser = null;
+
+        // --- 登录管理 ---
+        window.login = () => signInWithPopup(auth, provider).catch(err => alert("登录失败: " + err.message));
+        window.logout = () => signOut(auth);
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            const authSection = document.getElementById('authSection');
+            const appContent = document.getElementById('appContent');
+            if (user) {
+                authSection.innerHTML = `
+                    <div class="flex items-center gap-3 bg-slate-800 p-1 pr-3 rounded-full border border-slate-700">
+                        <img src="${user.photoURL}" class="w-7 h-7 rounded-full border border-blue-500">
+                        <span class="text-xs font-medium text-slate-200">${user.displayName}</span>
+                        <button onclick="logout()" class="text-[10px] text-slate-400 hover:text-red-400 transition">退出</button>
+                    </div>`;
+                appContent.classList.remove('opacity-50', 'pointer-events-none');
+            } else {
+                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition shadow-lg shadow-blue-900/20">Google 账号登录</button>`;
+                appContent.classList.add('opacity-50', 'pointer-events-none');
+            }
+        });
+
+        // --- 设备与预约逻辑 ---
+        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
+        const getHashColor = (str) => colors[Math.abs(str.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
+
+        window.addDevice = async () => {
+            const name = document.getElementById('deviceNameInput').value.trim();
+            if (!name) return;
+            try {
+                await addDoc(collection(db, "devices"), { name, bookings: {}, createdAt: Date.now() });
+                document.getElementById('deviceNameInput').value = '';
+            } catch (e) { alert("添加失败，请检查数据库规则: " + e.message); }
+        };
+
+        window.deleteDevice = async (id, name) => {
+            if (confirm(`确定要永久删除设备 "${name}" 吗？所有预约记录将丢失。`)) {
+                try { await deleteDoc(doc(db, "devices", id)); } 
+                catch (e) { alert("删除失败: " + e.message); }
+            }
+        };
+
+        window.handleCellClick = async (deviceId, slotIndex, currentBooking) => {
+            if (!currentUser) return alert("请先登录");
+            const deviceRef = doc(db, "devices", deviceId);
+            if (!currentBooking) {
+                const updates = {};
+                updates[`bookings.${slotIndex}`] = { uid: currentUser.uid, userName: currentUser.displayName, time: Date.now() };
+                await updateDoc(deviceRef, updates);
+            } else if (currentBooking.uid === currentUser.uid) {
+                if (confirm("要取消你的预约吗？")) {
+                    const updates = {};
+                    updates[`bookings.${slotIndex}`] = null;
+                    await updateDoc(deviceRef, updates);
+                }
+            } else {
+                alert(`该时段已被 ${currentBooking.userName} 预约`);
+            }
+        };
+
+        // --- 实时监听渲染 ---
+        const q = query(collection(db, "devices"), orderBy("createdAt", "asc"));
+        onSnapshot(q, (snapshot) => {
+            const list = document.getElementById('deviceList');
+            list.innerHTML = '<div id="currentTimeLine" class="now-indicator"></div>';
+            
+            snapshot.forEach((doc) => {
+                const device = doc.data();
+                const deviceId = doc.id;
+                let cells = '';
+                
+                for(let i=0; i<48; i++) {
+                    const booking = (device.bookings && device.bookings[i]) ? device.bookings[i] : null;
+                    const style = booking ? `background-color: ${getHashColor(booking.userName)};` : '';
+                    const bookingData = booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null';
+                    
+                    cells += `<div class="hour-cell ${booking ? 'booked' : ''}" 
+                                   style="${style}" 
+                                   onclick="handleCellClick('${deviceId}', ${i}, ${bookingData})"
+                                   title="${booking ? '预约人: ' + booking.userName : '点击预约'}">
+                                   ${booking ? booking.userName[0] : ''}
+                              </div>`;
+                }
+
+                const row = document.createElement('div');
+                row.className = "flex items-center group mb-6 hover:bg-slate-50 rounded-xl p-2 transition";
+                row.innerHTML = `
+                    <div class="w-40 flex-shrink-0 flex items-center gap-2 pr-4">
+                        <button onclick="deleteDevice('${deviceId}', '${device.name}')" class="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-500 transition">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                        </button>
+                        <span class="font-bold text-slate-700 truncate text-sm">${device.name}</span>
+                    </div>
+                    <div class="flex-grow timeline-grid bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden relative">
+                        ${cells}
+                    </div>
+                `;
+                list.appendChild(row);
+            });
+            updateTimeLine();
+        });
+
+        function updateTimeLine() {
+            const now = new Date();
+            const percentage = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
+            const line = document.getElementById('currentTimeLine');
+            if(line) line.style.left = `calc(10rem + ${percentage}%)`; // 10rem = w-40
+        }
+        setInterval(updateTimeLine, 10000);
+    </script>
+    <style>
+        .timeline-grid { display: grid; grid-template-columns: repeat(48, 1fr); min-width: 1000px; }
+        .hour-cell { border-right: 1px solid #f1f5f9; height: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: white; transition: all 0.15s; }
+        .hour-cell:hover { transform: scale(1.05); z-index: 10; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .now-indicator { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 30; pointer-events: none; filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.8)); }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+
+    <div class="max-w-[1500px] mx-auto p-4 md:p-8">
+        <nav class="bg-slate-900 text-white px-6 py-4 rounded-3xl mb-8 flex flex-wrap justify-between items-center shadow-2xl">
+            <div class="flex items-center gap-6">
+                <div class="bg-blue-600 p-2 rounded-xl">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                    </svg>
+                </div>
+                <h1 class="text-xl font-black tracking-widest uppercase">Device <span class="text-blue-400">Hub</span></h1>
+                <div id="authSection"></div>
+            </div>
+            
+            <div id="appContent" class="flex gap-3 opacity-50 pointer-events-none mt-4 md:mt-0">
+                <input id="deviceNameInput" type="text" placeholder="输入新设备名称..." class="bg-slate-800 border-none rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none w-48 transition-all focus:w-64">
+                <button onclick="addDevice()" class="bg-blue-500 hover:bg-blue-400 px-6 py-2 rounded-xl text-sm font-bold transition transform active:scale-95">添加设备</button>
+            </div>
+        </nav>
+
+        <div class="bg-white rounded-[2rem] shadow-xl border border-slate-200 p-8 overflow-hidden">
+            <div class="overflow-x-auto">
+                <div class="flex mb-6 border-b border-slate-100 pb-4">
+                    <div class="w-40 flex-shrink-0 text-slate-400 text-xs font-bold tracking-wider uppercase">设备列表</div>
+                    <div class="flex-grow">
+                        <div class="timeline-grid text-[10px] text-slate-400 font-bold">
+                            <script>
+                                for(let i=0; i<24; i++) {
+                                    document.write(`<div class="col-span-2 text-left pl-2 border-l border-slate-100">${i}:00</div>`);
+                                }
+                            </script>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="deviceList" class="relative">
+                    </div>
+            </div>
+        </div>
+        
+        <p class="text-center text-slate-400 text-xs mt-8 font-medium">提示：鼠标悬停在设备名称上可显示删除按钮 | 实时云同步已开启</p>
+    </div>
+
+</body>
+</html>
