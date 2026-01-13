@@ -2,15 +2,15 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>云端设备预约系统 - 管理员增强版</title>
+    <title>设备预约系统 - UTC+3 时区增强版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // ==========================================
-        // 🔥 1. 你的 Firebase 配置
+        // 🔥 1. Firebase 配置
         // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyD3HFJZ7aJOQ7lKjKfkcWqkF3fc98HKBU4",
@@ -22,9 +22,9 @@
         };
 
         // ==========================================
-        // 🔥 2. 设置管理员邮箱白名单 (在此修改)
+        // 🔥 2. 管理员邮箱设置 (请在此修改)
         // ==========================================
-        const adminEmails = ["yaoguai.gis@gmail.com", "admin@example.com"]; 
+        const adminEmails = ["your-email@gmail.com"]; 
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
@@ -34,7 +34,14 @@
         let currentUser = null;
         let isAdmin = false;
 
-        // --- 登录管理 ---
+        // 获取 UTC+3 时间的辅助函数
+        function getUTC3Date() {
+            const now = new Date();
+            // UTC时间 + 3小时
+            return new Date(now.getTime() + (3 * 60 * 60 * 1000) + (now.getTimezoneOffset() * 60000));
+        }
+
+        // --- 登录逻辑 ---
         window.login = () => signInWithPopup(auth, provider).catch(err => alert("登录失败: " + err.message));
         window.logout = () => signOut(auth);
 
@@ -45,78 +52,69 @@
             const adminControls = document.getElementById('adminControls');
             
             if (user) {
-                // 判断当前用户是否为管理员
                 isAdmin = adminEmails.includes(user.email);
-                
                 authSection.innerHTML = `
                     <div class="flex items-center gap-3 bg-slate-800 p-1 pr-3 rounded-full border border-slate-700">
-                        <img src="${user.photoURL}" class="w-7 h-7 rounded-full border border-blue-500">
-                        <div class="flex flex-col">
+                        <img src="${user.photoURL}" class="w-7 h-7 rounded-full">
+                        <div class="flex flex-col text-left">
                             <span class="text-[10px] font-bold text-slate-200 leading-none">${user.displayName}</span>
-                            <span class="text-[9px] text-blue-400">${isAdmin ? '管理员' : '使用者'}</span>
+                            <span class="text-[9px] text-blue-400">${isAdmin ? '管理员 (UTC+3)' : '使用者 (UTC+3)'}</span>
                         </div>
                         <button onclick="logout()" class="ml-2 text-[10px] text-slate-400 hover:text-red-400 transition">退出</button>
                     </div>`;
-                
                 appContent.classList.remove('opacity-50', 'pointer-events-none');
-                
-                // 根据身份显示/隐藏管理员控制栏
-                if (isAdmin) {
-                    adminControls.classList.remove('hidden');
-                } else {
-                    adminControls.classList.add('hidden');
-                }
+                if (isAdmin) adminControls.classList.remove('hidden');
             } else {
-                isAdmin = false;
-                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition shadow-lg">Google 登录</button>`;
+                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold">Google 登录</button>`;
                 appContent.classList.add('opacity-50', 'pointer-events-none');
                 adminControls.classList.add('hidden');
             }
         });
 
-        // --- 设备操作 (带权限检查) ---
+        // --- 管理员操作 ---
         window.addDevice = async () => {
-            if (!isAdmin) return alert("只有管理员可以增加设备");
+            if (!isAdmin) return;
             const name = document.getElementById('deviceNameInput').value.trim();
             if (!name) return;
-            try {
-                await addDoc(collection(db, "devices"), { name, bookings: {}, createdAt: Date.now() });
-                document.getElementById('deviceNameInput').value = '';
-            } catch (e) { alert("操作失败: " + e.message); }
+            await addDoc(collection(db, "devices"), { name, bookings: {}, createdAt: Date.now() });
+            document.getElementById('deviceNameInput').value = '';
         };
 
         window.deleteDevice = async (id, name) => {
-            if (!isAdmin) return alert("只有管理员可以删除设备");
-            if (confirm(`管理员确认：要永久删除 "${name}" 吗？`)) {
-                try { await deleteDoc(doc(db, "devices", id)); } 
-                catch (e) { alert("删除失败: " + e.message); }
+            if (isAdmin && confirm(`确定删除设备 "${name}" 吗？`)) {
+                await deleteDoc(doc(db, "devices", id));
             }
         };
 
-        // --- 预约逻辑 (所有人均可预约) ---
+        // --- 核心预约逻辑 ---
         window.handleCellClick = async (deviceId, slotIndex, currentBooking) => {
             if (!currentUser) return alert("请先登录");
             const deviceRef = doc(db, "devices", deviceId);
+            
             if (!currentBooking) {
+                // 执行预约
                 const updates = {};
-                updates[`bookings.${slotIndex}`] = { uid: currentUser.uid, userName: currentUser.displayName, time: Date.now() };
+                updates[`bookings.${slotIndex}`] = { 
+                    uid: currentUser.uid, 
+                    userName: currentUser.displayName, 
+                    time: getUTC3Date().getTime() 
+                };
                 await updateDoc(deviceRef, updates);
             } else if (currentBooking.uid === currentUser.uid || isAdmin) {
-                // 管理员也可以强制取消他人的预约
-                const msg = isAdmin && currentBooking.uid !== currentUser.uid ? 
-                            `管理员权限：确定要取消 ${currentBooking.userName} 的预约吗？` : 
-                            "要取消你的预约吗？";
-                if (confirm(msg)) {
+                // 取消预约 (本人或管理员)
+                const promptMsg = isAdmin && currentBooking.uid !== currentUser.uid ? 
+                                 `管理员操作：取消 ${currentBooking.userName} 的预约？` : "确认取消预约？";
+                if (confirm(promptMsg)) {
                     const updates = {};
                     updates[`bookings.${slotIndex}`] = null;
                     await updateDoc(deviceRef, updates);
                 }
             } else {
-                alert(`该时段已被 ${currentBooking.userName} 预约`);
+                alert(`已被 ${currentBooking.userName} 占用`);
             }
         };
 
-        // --- 渲染逻辑 ---
+        // --- 实时监听渲染 ---
         const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
         const getHashColor = (str) => colors[Math.abs(str.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
 
@@ -129,77 +127,63 @@
                 const device = doc.data();
                 const deviceId = doc.id;
                 let cells = '';
-                
                 for(let i=0; i<48; i++) {
                     const booking = (device.bookings && device.bookings[i]) ? device.bookings[i] : null;
                     const style = booking ? `background-color: ${getHashColor(booking.userName)};` : '';
                     const bookingData = booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null';
-                    cells += `<div class="hour-cell ${booking ? 'booked' : ''}" 
-                                   style="${style}" 
-                                   onclick="handleCellClick('${deviceId}', ${i}, ${bookingData})"
-                                   title="${booking ? '预约人: ' + booking.userName : '空闲'}">${booking ? booking.userName[0] : ''}</div>`;
+                    cells += `<div class="hour-cell" style="${style}" onclick="handleCellClick('${deviceId}', ${i}, ${bookingData})">
+                                ${booking ? booking.userName[0] : ''}
+                              </div>`;
                 }
 
                 const row = document.createElement('div');
                 row.className = "flex items-center group mb-6 hover:bg-slate-50 rounded-xl p-2 transition";
                 row.innerHTML = `
                     <div class="w-44 flex-shrink-0 flex items-center gap-2 pr-4">
-                        ${isAdmin ? `
-                        <button onclick="deleteDevice('${deviceId}', '${device.name}')" class="p-1 text-slate-300 hover:text-red-500 transition">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                        </button>` : ''}
+                        ${isAdmin ? `<button onclick="deleteDevice('${deviceId}', '${device.name}')" class="text-slate-300 hover:text-red-500 transition"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
                         <span class="font-bold text-slate-700 truncate text-sm">${device.name}</span>
                     </div>
-                    <div class="flex-grow timeline-grid bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden relative">
-                        ${cells}
-                    </div>
+                    <div class="flex-grow timeline-grid bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden relative">${cells}</div>
                 `;
                 list.appendChild(row);
             });
             updateTimeLine();
         });
 
+        // --- UTC+3 时间指针对齐 ---
         function updateTimeLine() {
-            const now = new Date();
-            const percentage = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
+            const utc3 = getUTC3Date();
+            const minutesInDay = utc3.getHours() * 60 + utc3.getMinutes();
+            const percentage = (minutesInDay / 1440) * 100;
             const line = document.getElementById('currentTimeLine');
-            if(line) line.style.left = `calc(11rem + ${percentage}%)`; // 11rem = w-44
+            if(line) {
+                // 11rem (w-44) 是侧边栏宽度
+                line.style.left = `calc(11rem + ${percentage}%)`;
+            }
         }
         setInterval(updateTimeLine, 10000);
     </script>
     <style>
         .timeline-grid { display: grid; grid-template-columns: repeat(48, 1fr); min-width: 1000px; }
         .hour-cell { border-right: 1px solid #f1f5f9; height: 44px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: white; transition: all 0.15s; }
-        .hour-cell:hover { transform: scale(1.05); z-index: 10; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        .now-indicator { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 30; pointer-events: none; filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.8)); }
+        .hour-cell:hover { background-color: #f8fafc; transform: scale(1.02); z-index: 10; }
+        .now-indicator { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 30; pointer-events: none; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5); }
     </style>
 </head>
 <body class="bg-slate-100 min-h-screen">
-
     <div class="max-w-[1500px] mx-auto p-4 md:p-8">
-        <nav class="bg-slate-900 text-white px-6 py-4 rounded-3xl mb-8 flex flex-wrap justify-between items-center shadow-2xl">
+        <nav class="bg-slate-900 text-white px-6 py-4 rounded-3xl mb-8 flex flex-wrap justify-between items-center shadow-2xl border-b-4 border-blue-500">
             <div class="flex items-center gap-6">
-                <div class="bg-blue-600 p-2 rounded-xl">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                    </svg>
-                </div>
-                <h1 class="text-xl font-black tracking-widest uppercase">Device <span class="text-blue-400">Hub</span></h1>
+                <h1 class="text-xl font-black tracking-widest uppercase">Sino <span class="text-blue-400">Time-Cloud</span></h1>
                 <div id="authSection"></div>
             </div>
-            
-            <div id="adminControls" class="hidden flex gap-3 mt-4 md:mt-0">
-                <input id="deviceNameInput" type="text" placeholder="管理员：输入设备名称..." class="bg-slate-800 border-none rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none w-48 transition-all focus:w-64">
-                <button onclick="addDevice()" class="bg-blue-500 hover:bg-blue-400 px-6 py-2 rounded-xl text-sm font-bold transition transform active:scale-95">增加设备</button>
-            </div>
+            <div id="adminControls" class="hidden flex gap-3"><input id="deviceNameInput" type="text" placeholder="新设备名" class="bg-slate-800 border-none rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none w-48 transition-all focus:w-64"><button onclick="addDevice()" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-xl text-sm font-bold">增加设备</button></div>
         </nav>
 
         <div id="appContent" class="bg-white rounded-[2rem] shadow-xl border border-slate-200 p-8 overflow-hidden opacity-50 pointer-events-none transition-all">
             <div class="overflow-x-auto">
                 <div class="flex mb-6 border-b border-slate-100 pb-4">
-                    <div class="w-44 flex-shrink-0 text-slate-400 text-xs font-bold tracking-wider uppercase pl-6">设备清单</div>
+                    <div class="w-44 flex-shrink-0 text-slate-400 text-xs font-bold uppercase pl-6 text-center">UTC+03:00 时段</div>
                     <div class="flex-grow">
                         <div class="timeline-grid text-[10px] text-slate-400 font-bold">
                             <script>
@@ -210,13 +194,10 @@
                         </div>
                     </div>
                 </div>
-
                 <div id="deviceList" class="relative"></div>
             </div>
         </div>
-        
-        <p class="text-center text-slate-400 text-xs mt-8 font-medium">提示：只有管理员账号可管理设备 | 使用者可点击空闲时段预约</p>
+        <p class="text-center text-slate-400 text-xs mt-8 font-medium italic">当前显示时区：(UTC+03:00) Riyadh / Moscow | 自动同步指针</p>
     </div>
-
 </body>
 </html>
