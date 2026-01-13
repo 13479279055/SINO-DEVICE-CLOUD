@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>云端设备预约系统 - 完整增强版</title>
+    <title>云端设备预约系统 - 管理员增强版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -10,7 +10,7 @@
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // ==========================================
-        // 🔥 你的 Firebase 配置
+        // 🔥 1. 你的 Firebase 配置
         // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyD3HFJZ7aJOQ7lKjKfkcWqkF3fc98HKBU4",
@@ -21,12 +21,18 @@
             appId: "1:898372256592:web:854498445d6aa490192255"
         };
 
+        // ==========================================
+        // 🔥 2. 设置管理员邮箱白名单 (在此修改)
+        // ==========================================
+        const adminEmails = ["yaoguai.gis@gmail.com", "admin@example.com"]; 
+
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
         const provider = new GoogleAuthProvider();
 
         let currentUser = null;
+        let isAdmin = false;
 
         // --- 登录管理 ---
         window.login = () => signInWithPopup(auth, provider).catch(err => alert("登录失败: " + err.message));
@@ -36,40 +42,58 @@
             currentUser = user;
             const authSection = document.getElementById('authSection');
             const appContent = document.getElementById('appContent');
+            const adminControls = document.getElementById('adminControls');
+            
             if (user) {
+                // 判断当前用户是否为管理员
+                isAdmin = adminEmails.includes(user.email);
+                
                 authSection.innerHTML = `
                     <div class="flex items-center gap-3 bg-slate-800 p-1 pr-3 rounded-full border border-slate-700">
                         <img src="${user.photoURL}" class="w-7 h-7 rounded-full border border-blue-500">
-                        <span class="text-xs font-medium text-slate-200">${user.displayName}</span>
-                        <button onclick="logout()" class="text-[10px] text-slate-400 hover:text-red-400 transition">退出</button>
+                        <div class="flex flex-col">
+                            <span class="text-[10px] font-bold text-slate-200 leading-none">${user.displayName}</span>
+                            <span class="text-[9px] text-blue-400">${isAdmin ? '管理员' : '使用者'}</span>
+                        </div>
+                        <button onclick="logout()" class="ml-2 text-[10px] text-slate-400 hover:text-red-400 transition">退出</button>
                     </div>`;
+                
                 appContent.classList.remove('opacity-50', 'pointer-events-none');
+                
+                // 根据身份显示/隐藏管理员控制栏
+                if (isAdmin) {
+                    adminControls.classList.remove('hidden');
+                } else {
+                    adminControls.classList.add('hidden');
+                }
             } else {
-                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition shadow-lg shadow-blue-900/20">Google 账号登录</button>`;
+                isAdmin = false;
+                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold transition shadow-lg">Google 登录</button>`;
                 appContent.classList.add('opacity-50', 'pointer-events-none');
+                adminControls.classList.add('hidden');
             }
         });
 
-        // --- 设备与预约逻辑 ---
-        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
-        const getHashColor = (str) => colors[Math.abs(str.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
-
+        // --- 设备操作 (带权限检查) ---
         window.addDevice = async () => {
+            if (!isAdmin) return alert("只有管理员可以增加设备");
             const name = document.getElementById('deviceNameInput').value.trim();
             if (!name) return;
             try {
                 await addDoc(collection(db, "devices"), { name, bookings: {}, createdAt: Date.now() });
                 document.getElementById('deviceNameInput').value = '';
-            } catch (e) { alert("添加失败，请检查数据库规则: " + e.message); }
+            } catch (e) { alert("操作失败: " + e.message); }
         };
 
         window.deleteDevice = async (id, name) => {
-            if (confirm(`确定要永久删除设备 "${name}" 吗？所有预约记录将丢失。`)) {
+            if (!isAdmin) return alert("只有管理员可以删除设备");
+            if (confirm(`管理员确认：要永久删除 "${name}" 吗？`)) {
                 try { await deleteDoc(doc(db, "devices", id)); } 
                 catch (e) { alert("删除失败: " + e.message); }
             }
         };
 
+        // --- 预约逻辑 (所有人均可预约) ---
         window.handleCellClick = async (deviceId, slotIndex, currentBooking) => {
             if (!currentUser) return alert("请先登录");
             const deviceRef = doc(db, "devices", deviceId);
@@ -77,8 +101,12 @@
                 const updates = {};
                 updates[`bookings.${slotIndex}`] = { uid: currentUser.uid, userName: currentUser.displayName, time: Date.now() };
                 await updateDoc(deviceRef, updates);
-            } else if (currentBooking.uid === currentUser.uid) {
-                if (confirm("要取消你的预约吗？")) {
+            } else if (currentBooking.uid === currentUser.uid || isAdmin) {
+                // 管理员也可以强制取消他人的预约
+                const msg = isAdmin && currentBooking.uid !== currentUser.uid ? 
+                            `管理员权限：确定要取消 ${currentBooking.userName} 的预约吗？` : 
+                            "要取消你的预约吗？";
+                if (confirm(msg)) {
                     const updates = {};
                     updates[`bookings.${slotIndex}`] = null;
                     await updateDoc(deviceRef, updates);
@@ -88,7 +116,10 @@
             }
         };
 
-        // --- 实时监听渲染 ---
+        // --- 渲染逻辑 ---
+        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
+        const getHashColor = (str) => colors[Math.abs(str.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
+
         const q = query(collection(db, "devices"), orderBy("createdAt", "asc"));
         onSnapshot(q, (snapshot) => {
             const list = document.getElementById('deviceList');
@@ -103,24 +134,22 @@
                     const booking = (device.bookings && device.bookings[i]) ? device.bookings[i] : null;
                     const style = booking ? `background-color: ${getHashColor(booking.userName)};` : '';
                     const bookingData = booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null';
-                    
                     cells += `<div class="hour-cell ${booking ? 'booked' : ''}" 
                                    style="${style}" 
                                    onclick="handleCellClick('${deviceId}', ${i}, ${bookingData})"
-                                   title="${booking ? '预约人: ' + booking.userName : '点击预约'}">
-                                   ${booking ? booking.userName[0] : ''}
-                              </div>`;
+                                   title="${booking ? '预约人: ' + booking.userName : '空闲'}">${booking ? booking.userName[0] : ''}</div>`;
                 }
 
                 const row = document.createElement('div');
                 row.className = "flex items-center group mb-6 hover:bg-slate-50 rounded-xl p-2 transition";
                 row.innerHTML = `
-                    <div class="w-40 flex-shrink-0 flex items-center gap-2 pr-4">
-                        <button onclick="deleteDevice('${deviceId}', '${device.name}')" class="opacity-0 group-hover:opacity-100 p-1 text-slate-300 hover:text-red-500 transition">
+                    <div class="w-44 flex-shrink-0 flex items-center gap-2 pr-4">
+                        ${isAdmin ? `
+                        <button onclick="deleteDevice('${deviceId}', '${device.name}')" class="p-1 text-slate-300 hover:text-red-500 transition">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                             </svg>
-                        </button>
+                        </button>` : ''}
                         <span class="font-bold text-slate-700 truncate text-sm">${device.name}</span>
                     </div>
                     <div class="flex-grow timeline-grid bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden relative">
@@ -136,7 +165,7 @@
             const now = new Date();
             const percentage = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
             const line = document.getElementById('currentTimeLine');
-            if(line) line.style.left = `calc(10rem + ${percentage}%)`; // 10rem = w-40
+            if(line) line.style.left = `calc(11rem + ${percentage}%)`; // 11rem = w-44
         }
         setInterval(updateTimeLine, 10000);
     </script>
@@ -161,16 +190,16 @@
                 <div id="authSection"></div>
             </div>
             
-            <div id="appContent" class="flex gap-3 opacity-50 pointer-events-none mt-4 md:mt-0">
-                <input id="deviceNameInput" type="text" placeholder="输入新设备名称..." class="bg-slate-800 border-none rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none w-48 transition-all focus:w-64">
-                <button onclick="addDevice()" class="bg-blue-500 hover:bg-blue-400 px-6 py-2 rounded-xl text-sm font-bold transition transform active:scale-95">添加设备</button>
+            <div id="adminControls" class="hidden flex gap-3 mt-4 md:mt-0">
+                <input id="deviceNameInput" type="text" placeholder="管理员：输入设备名称..." class="bg-slate-800 border-none rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500 outline-none w-48 transition-all focus:w-64">
+                <button onclick="addDevice()" class="bg-blue-500 hover:bg-blue-400 px-6 py-2 rounded-xl text-sm font-bold transition transform active:scale-95">增加设备</button>
             </div>
         </nav>
 
-        <div class="bg-white rounded-[2rem] shadow-xl border border-slate-200 p-8 overflow-hidden">
+        <div id="appContent" class="bg-white rounded-[2rem] shadow-xl border border-slate-200 p-8 overflow-hidden opacity-50 pointer-events-none transition-all">
             <div class="overflow-x-auto">
                 <div class="flex mb-6 border-b border-slate-100 pb-4">
-                    <div class="w-40 flex-shrink-0 text-slate-400 text-xs font-bold tracking-wider uppercase">设备列表</div>
+                    <div class="w-44 flex-shrink-0 text-slate-400 text-xs font-bold tracking-wider uppercase pl-6">设备清单</div>
                     <div class="flex-grow">
                         <div class="timeline-grid text-[10px] text-slate-400 font-bold">
                             <script>
@@ -182,12 +211,11 @@
                     </div>
                 </div>
 
-                <div id="deviceList" class="relative">
-                    </div>
+                <div id="deviceList" class="relative"></div>
             </div>
         </div>
         
-        <p class="text-center text-slate-400 text-xs mt-8 font-medium">提示：鼠标悬停在设备名称上可显示删除按钮 | 实时云同步已开启</p>
+        <p class="text-center text-slate-400 text-xs mt-8 font-medium">提示：只有管理员账号可管理设备 | 使用者可点击空闲时段预约</p>
     </div>
 
 </body>
