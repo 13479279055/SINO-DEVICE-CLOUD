@@ -3,16 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sino Device Hub - Pro Edition</title>
+    <title>Sino Device Hub - GMT+3 Optimized</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getFirestore, doc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
-        // ==========================================
-        // 🔥 1. Firebase 配置 (保持不变)
-        // ==========================================
+        // 1. Firebase 配置 (保持不变)
         const firebaseConfig = {
             apiKey: "AIzaSyD3HFJZ7aJOQ7lKjKfkcWqkF3fc98HKBU4",
             authDomain: "sino-device-cloud.firebaseapp.com",
@@ -22,11 +20,7 @@
             appId: "1:898372256592:web:854498445d6aa490192255"
         };
 
-        // ==========================================
-        // 🔥 2. 管理员配置
-        // ==========================================
         const adminEmails = ["yaoguai.gis@gmail.com"]; 
-
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
@@ -35,103 +29,120 @@
         let currentUser = null;
         let isAdmin = false;
 
-        // --- 时间逻辑优化 (GMT+3) ---
+        // --- GMT+3 时间逻辑 ---
         function getUTC3Time() {
             const now = new Date();
             const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
             return new Date(utc + (3 * 3600000)); 
         }
 
-        // 每天凌晨自动刷新页面
-        function scheduleMidnightRefresh() {
+        // 凌晨 12 点自动刷新
+        function scheduleRefresh() {
             const now = getUTC3Time();
-            const midnight = new Date(now);
-            midnight.setHours(24, 0, 0, 0); 
-            const timeToWait = midnight.getTime() - now.getTime();
+            const tomorrow = new Date(now);
+            tomorrow.setHours(24, 0, 0, 0);
+            setTimeout(() => window.location.reload(), tomorrow.getTime() - now.getTime());
+        }
+
+        // --- 核心逻辑：更新红线位置 ---
+        function updateTimeLine() {
+            const now = getUTC3Time();
+            const minutes = now.getHours() * 60 + now.getMinutes();
+            const percentage = (minutes / 1440) * 100;
             
-            console.log(`System: Next refresh in ${(timeToWait/1000/60).toFixed(1)} minutes`);
-            setTimeout(() => {
-                window.location.reload();
-            }, timeToWait);
+            // 获取所有行中的指示器
+            const indicators = document.querySelectorAll('.now-indicator');
+            indicators.forEach(el => {
+                el.style.left = `${percentage}%`;
+                el.style.display = 'block';
+            });
         }
 
-        // 更新顶部数字时钟
-        function updateDigitalClock() {
-            const clockEl = document.getElementById('digitalClock');
-            if(clockEl) {
-                const now = getUTC3Time();
-                clockEl.innerText = now.toTimeString().split(' ')[0];
-            }
-        }
-
-        // --- 登录/登出 ---
-        window.login = () => signInWithPopup(auth, provider);
-        window.logout = () => signOut(auth);
-
+        // --- 登录状态 (保持不变) ---
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
             const authSection = document.getElementById('authSection');
-            const adminControls = document.getElementById('adminControls');
             const appContent = document.getElementById('appContent');
+            const adminControls = document.getElementById('adminControls');
             
             if (user) {
                 isAdmin = adminEmails.includes(user.email);
                 authSection.innerHTML = `
-                    <div class="flex items-center gap-3 bg-slate-800/50 backdrop-blur-md p-1.5 pr-4 rounded-full border border-slate-700/50 shadow-inner">
-                        <img src="${user.photoURL}" class="w-8 h-8 rounded-full border-2 border-blue-500 shadow-blue-500/20">
+                    <div class="flex items-center gap-2 bg-slate-800 p-1 pr-3 rounded-full border border-slate-700">
+                        <img src="${user.photoURL}" class="w-7 h-7 rounded-full">
                         <div class="flex flex-col">
-                            <span class="text-[11px] font-bold text-slate-100 leading-none">${user.displayName}</span>
-                            <span class="text-[9px] ${isAdmin ? 'text-amber-400' : 'text-blue-400'} font-black tracking-widest uppercase mt-0.5">${isAdmin ? 'ADMIN ACCESS' : 'MEMBER'}</span>
+                            <span class="text-[10px] text-white font-bold leading-none">${user.displayName}</span>
+                            <span class="text-[8px] text-blue-400 font-black uppercase">${isAdmin ? 'ADMIN' : 'USER'}</span>
                         </div>
-                        <button onclick="logout()" class="ml-2 p-1 hover:bg-red-500/20 rounded-full transition-colors group">
-                            <svg class="w-4 h-4 text-slate-400 group-hover:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        </button>
+                        <button onclick="logout()" class="text-[10px] text-slate-500 hover:text-red-400 ml-1">退出</button>
                     </div>`;
-                
                 appContent.classList.remove('opacity-20', 'pointer-events-none');
                 adminControls.classList.toggle('hidden', !isAdmin);
                 adminControls.classList.toggle('flex', isAdmin);
             } else {
-                isAdmin = false;
-                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-500 text-white px-8 py-2.5 rounded-full text-sm font-bold shadow-[0_0_20px_rgba(37,99,235,0.3)] transition-all transform hover:scale-105 active:scale-95">Sign in with Google</button>`;
+                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-xs font-bold transition-all">Google 登录</button>`;
                 appContent.classList.add('opacity-20', 'pointer-events-none');
-                adminControls.style.display = 'none';
             }
         });
 
-        // --- 数据操作 ---
+        // --- 数据渲染 ---
+        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
+        const getHashColor = (name) => colors[Math.abs(name.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
+
+        const q = query(collection(db, "devices"), orderBy("createdAt", "asc"));
+        onSnapshot(q, (snapshot) => {
+            const list = document.getElementById('deviceList');
+            list.innerHTML = '';
+            
+            snapshot.forEach((docSnap) => {
+                const device = docSnap.data();
+                const deviceId = docSnap.id;
+                let cells = '';
+                
+                for(let i=0; i<48; i++) {
+                    const booking = (device.bookings && device.bookings[i]) ? device.bookings[i] : null;
+                    const style = booking ? `background-color: ${getHashColor(booking.userName)}; opacity: 0.9;` : '';
+                    const bookingData = booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null';
+                    cells += `<div class="hour-cell" style="${style}" onclick="handleCellClick('${deviceId}', ${i}, ${bookingData})">${booking ? booking.userName[0] : ''}</div>`;
+                }
+
+                const row = document.createElement('div');
+                row.className = "device-row flex items-center group border-b border-slate-100 hover:bg-blue-50/50 transition-colors";
+                row.innerHTML = `
+                    <div class="sticky-side w-40 flex-shrink-0 flex items-center p-3 bg-white z-10 border-r border-slate-100 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                        ${isAdmin ? `<button onclick="deleteDevice('${deviceId}', '${device.name}')" class="mr-2 text-slate-300 hover:text-red-500 transition-colors"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
+                        <span class="text-xs font-bold text-slate-600 truncate">${device.name}</span>
+                    </div>
+                    <div class="flex-grow timeline-grid relative h-10">
+                        <div class="now-indicator"></div>
+                        ${cells}
+                    </div>
+                `;
+                list.appendChild(row);
+            });
+            updateTimeLine();
+        });
+
+        // 全局函数
+        window.login = () => signInWithPopup(auth, provider);
+        window.logout = () => signOut(auth);
+        window.deleteDevice = async (id, name) => isAdmin && confirm(`删除设备 ${name}?`) && await deleteDoc(doc(db, "devices", id));
         window.addDevice = async () => {
-            const nameInput = document.getElementById('deviceNameInput');
-            const name = nameInput.value.trim();
-            if (isAdmin && name) {
-                try {
-                    await addDoc(collection(db, "devices"), { name, bookings: {}, createdAt: Date.now() });
-                    nameInput.value = '';
-                } catch (e) { alert("Error: " + e.message); }
+            const input = document.getElementById('deviceNameInput');
+            if(isAdmin && input.value) {
+                await addDoc(collection(db, "devices"), { name: input.value, bookings: {}, createdAt: Date.now() });
+                input.value = '';
             }
         };
-
-        window.deleteDevice = async (id, name) => {
-            if (isAdmin && confirm(`Delete device [${name}]? This cannot be undone.`)) {
-                await deleteDoc(doc(db, "devices", id));
-            }
-        };
-
         window.handleCellClick = async (deviceId, slotIndex, currentBooking) => {
             if (!currentUser) return;
             const deviceRef = doc(db, "devices", deviceId);
-            
             if (!currentBooking) {
                 const updates = {};
-                updates[`bookings.${slotIndex}`] = {
-                    uid: currentUser.uid,
-                    userName: currentUser.displayName,
-                    time: getUTC3Time().getTime()
-                };
+                updates[`bookings.${slotIndex}`] = { uid: currentUser.uid, userName: currentUser.displayName, time: getUTC3Time().getTime() };
                 await updateDoc(deviceRef, updates);
             } else if (currentBooking.uid === currentUser.uid || isAdmin) {
-                const msg = (isAdmin && currentBooking.uid !== currentUser.uid) ? `Admin: Force cancel ${currentBooking.userName}'s reservation?` : "Cancel this booking?";
-                if (confirm(msg)) {
+                if (confirm("取消该预约？")) {
                     const updates = {};
                     updates[`bookings.${slotIndex}`] = null;
                     await updateDoc(deviceRef, updates);
@@ -139,144 +150,69 @@
             }
         };
 
-        // --- 实时数据渲染 ---
-        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#4f46e5'];
-        const getHashColor = (name) => colors[Math.abs(name.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
-
-        const q = query(collection(db, "devices"), orderBy("createdAt", "asc"));
-        onSnapshot(q, (snapshot) => {
-            const list = document.getElementById('deviceList');
-            list.innerHTML = ''; // 清空列表，由 CSS 渲染指示器
-            
-            snapshot.forEach((doc) => {
-                const device = doc.data();
-                const deviceId = doc.id;
-                let cells = '';
-                for(let i=0; i<48; i++) {
-                    const booking = (device.bookings && device.bookings[i]) ? device.bookings[i] : null;
-                    const style = booking ? `background-color: ${getHashColor(booking.userName)};` : '';
-                    const bookingData = booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null';
-                    cells += `<div class="hour-cell" style="${style}" onclick="handleCellClick('${deviceId}', ${i}, ${bookingData})">
-                                ${booking ? `<span class="opacity-80">${booking.userName[0]}</span>` : ''}
-                              </div>`;
-                }
-
-                const row = document.createElement('div');
-                row.className = "device-row flex items-center group border-b border-slate-100 hover:bg-blue-50/30 transition-colors";
-                row.innerHTML = `
-                    <div class="sticky-col w-48 flex-shrink-0 flex items-center px-4 py-4 bg-white z-10 border-r border-slate-100 shadow-[4px_0_8px_-4px_rgba(0,0,0,0.05)]">
-                        ${isAdmin ? `<button onclick="deleteDevice('${deviceId}', '${device.name}')" class="p-1.5 mr-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
-                        <span class="text-sm font-semibold text-slate-700 truncate">${device.name}</span>
-                    </div>
-                    <div class="flex-grow timeline-grid relative h-full">${cells}</div>
-                `;
-                list.appendChild(row);
-            });
-            updateTimeLine();
-        });
-
-        function updateTimeLine() {
-            const utc3 = getUTC3Time();
-            const totalMinutes = utc3.getHours() * 60 + utc3.getMinutes();
-            const percentage = (totalMinutes / 1440) * 100;
-            const indicators = document.querySelectorAll('.now-indicator');
-            indicators.forEach(line => {
-                line.style.left = `calc(12rem + ${percentage}%)`; // 12rem = w-48
-            });
-        }
-
         // 初始化
-        scheduleMidnightRefresh();
-        setInterval(updateTimeLine, 30000);
-        setInterval(updateDigitalClock, 1000);
-        updateDigitalClock();
+        scheduleRefresh();
+        setInterval(updateTimeLine, 60000); // 每一分钟更新一次指针位置
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-        body { font-family: 'Inter', sans-serif; }
+        .timeline-grid { display: grid; grid-template-columns: repeat(48, 1fr); min-width: 960px; }
+        .hour-cell { border-right: 1px solid #f1f5f9; height: 100%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: white; }
+        .hour-cell:hover { background-color: #f8fafc; box-shadow: inset 0 0 0 1px #3b82f6; z-index: 5; }
         
-        /* 响应式网格：48格代表24小时 */
-        .timeline-grid { display: grid; grid-template-columns: repeat(48, 1fr); min-width: 1200px; }
+        /* 核心改进：红线现在相对于网格定位 */
+        .now-indicator { 
+            position: absolute; top: 0; bottom: 0; width: 2px; 
+            background: #ef4444; z-index: 20; pointer-events: none; 
+            display: none; box-shadow: 0 0 4px rgba(239, 68, 68, 0.4);
+        }
         
-        .hour-cell { border-right: 1px solid #f8fafc; height: 52px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: white; transition: all 0.15s ease; }
-        .hour-cell:hover { background-color: #eff6ff; border-radius: 4px; transform: scale(0.95); z-index: 10; box-shadow: inset 0 0 0 2px #3b82f6; }
-        
-        /* 指示器美化 */
-        .now-indicator { position: absolute; top: 0; bottom: 0; width: 3px; background: #ef4444; z-index: 30; pointer-events: none; }
-        .now-indicator::after { content: ''; position: absolute; top: -4px; left: -3.5px; width: 10px; height: 10px; background: #ef4444; border-radius: 50%; box-shadow: 0 0 10px #ef4444; }
+        /* 侧边栏固定 */
+        .sticky-side { position: sticky; left: 0; }
+        .device-row:nth-child(even) { background-color: #fafafa; }
+        .device-row:nth-child(even) .sticky-side { background-color: #fafafa; }
 
-        /* 粘性列阴影 */
-        .sticky-col { position: sticky; left: 0; transition: background-color 0.3s; }
-        .device-row:nth-child(even) .sticky-col { background-color: #f8fafc; }
-        .device-row:nth-child(even) { background-color: #f8fafc; }
-
-        /* 自定义滚动条 */
-        ::-webkit-scrollbar { height: 8px; width: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        /* 隐藏滚动条美化 */
+        .overflow-x-auto::-webkit-scrollbar { height: 6px; }
+        .overflow-x-auto::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
     </style>
 </head>
-<body class="bg-[#f4f7fa] text-slate-900 min-h-screen pb-20">
-    <div class="max-w-[1600px] mx-auto p-4 lg:p-8">
-        <nav class="bg-slate-900 rounded-3xl p-5 shadow-2xl flex flex-wrap justify-between items-center mb-8 border-b-4 border-blue-600 relative overflow-hidden">
-            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500"></div>
-            
-            <div class="flex items-center gap-8 z-10">
+<body class="bg-slate-50 min-h-screen font-sans">
+    <div class="max-w-[1400px] mx-auto p-4 lg:p-10">
+        <header class="bg-slate-900 rounded-3xl p-6 shadow-xl flex justify-between items-center mb-6 border-b-4 border-blue-600">
+            <div class="flex items-center gap-6">
                 <div>
-                    <h1 class="text-2xl font-black italic tracking-tighter text-white">SINO <span class="text-blue-500 underline decoration-2 underline-offset-4">CLOUD</span></h1>
-                    <div class="flex items-center gap-2 mt-1">
-                        <span class="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                        <span class="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em]">GMT+3 Live: <span id="digitalClock" class="text-slate-200 ml-1 font-mono text-xs">00:00:00</span></span>
-                    </div>
+                    <h1 class="text-xl font-black text-white italic tracking-tighter">SINO <span class="text-blue-500 text-2xl">DEVICE</span></h1>
+                    <p class="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Global Cloud Service (GMT+3)</p>
                 </div>
                 <div id="authSection"></div>
             </div>
-
-            <div id="adminControls" class="hidden items-center gap-3 z-10">
-                <div class="relative group">
-                    <input id="deviceNameInput" type="text" placeholder="New Device Name..." class="bg-slate-800 text-white text-xs rounded-2xl px-5 py-3 border border-slate-700 focus:ring-2 focus:ring-blue-500 outline-none w-60 transition-all focus:w-80">
-                </div>
-                <button onclick="addDevice()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-extrabold px-6 py-3 rounded-2xl transition-all shadow-[0_4px_15px_rgba(37,99,235,0.4)] active:translate-y-0.5">ADD DEVICE</button>
+            
+            <div id="adminControls" class="hidden gap-2">
+                <input id="deviceNameInput" type="text" placeholder="添加新设备..." class="bg-slate-800 text-white text-[11px] rounded-xl px-4 py-2 border-none outline-none focus:ring-1 focus:ring-blue-500 w-40">
+                <button onclick="addDevice()" class="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-4 py-2 rounded-xl transition shadow-lg">添加</button>
             </div>
-        </nav>
+        </header>
 
-        <div id="appContent" class="bg-white rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-200 overflow-hidden opacity-20 pointer-events-none transition-all duration-700">
-            <div class="overflow-x-auto relative">
-                <div class="flex border-b border-slate-200 bg-slate-50/50 backdrop-blur-sm sticky top-0 z-20">
-                    <div class="w-48 flex-shrink-0 flex items-center px-6 py-4 bg-slate-50 font-black text-[11px] text-slate-500 uppercase tracking-widest border-r border-slate-200">
-                        Device Inventory
-                    </div>
-                    <div class="flex-grow">
-                        <div class="timeline-grid">
-                            <script>
-                                for(let i=0; i<24; i++) {
-                                    document.write(`
-                                        <div class="col-span-2 text-center py-4 border-l border-slate-100 relative">
-                                            <span class="text-[10px] font-bold text-slate-400">${i}:00</span>
-                                        </div>
-                                    `);
-                                }
-                            </script>
-                        </div>
+        <main id="appContent" class="bg-white rounded-[2rem] shadow-sm border border-slate-200 overflow-hidden opacity-20 transition-all duration-500">
+            <div class="overflow-x-auto">
+                <div class="flex bg-slate-50/80 border-b border-slate-100 sticky top-0 z-30 backdrop-blur-sm">
+                    <div class="w-40 flex-shrink-0 p-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter border-r border-slate-100 bg-slate-50">Device Name</div>
+                    <div class="flex-grow timeline-grid relative">
+                        <script>
+                            for(let i=0; i<24; i++) {
+                                document.write(`<div class="col-span-2 text-left pl-1 border-l border-slate-200/50 text-[9px] font-bold text-slate-400 py-2">${i}:00</div>`);
+                            }
+                        </script>
+                        <div class="now-indicator" style="background: #ef4444; width: 2px;"></div>
                     </div>
                 </div>
 
-                <div id="deviceListContainer" class="relative">
-                    <div id="currentTimeLine" class="now-indicator"></div>
-                    <div id="deviceList">
-                        </div>
-                </div>
+                <div id="deviceList" class="relative"></div>
             </div>
-        </div>
+        </main>
         
-        <footer class="mt-10 flex flex-col items-center gap-2">
-            <div class="px-4 py-1.5 bg-slate-200 rounded-full text-[10px] font-bold text-slate-500 uppercase tracking-tighter">
-                Reservation System Rules
-            </div>
-            <p class="text-slate-400 text-[11px] italic">
-                * Automatic refresh at 00:00 (GMT+3) | Click grids to book 30min slots | Admin can manage all entries.
-            </p>
+        <footer class="mt-6 text-center text-slate-400 text-[10px] font-medium italic">
+            * 每天零点系统自动重置预约 | 点击格子预约 30 分钟时段 | 管理员可强制取消他人预约
         </footer>
     </div>
 </body>
