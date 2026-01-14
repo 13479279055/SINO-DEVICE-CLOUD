@@ -3,13 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sino Hub - 48H UI Fixed</title>
+    <title>Sino Device Hub - Admin Fixed Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getFirestore, doc, onSnapshot, collection, addDoc, updateDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
+        // ==========================================
+        // 🔥 1. Firebase 配置
+        // ==========================================
         const firebaseConfig = {
             apiKey: "AIzaSyD3HFJZ7aJOQ7lKjKfkcWqkF3fc98HKBU4",
             authDomain: "sino-device-cloud.firebaseapp.com",
@@ -19,7 +22,11 @@
             appId: "1:898372256592:web:854498445d6aa490192255"
         };
 
+        // ==========================================
+        // 🔥 2. 管理员邮箱列表 (请务必在此填写你的邮箱)
+        // ==========================================
         const adminEmails = ["yaoguai.gis@gmail.com"]; 
+
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
@@ -27,21 +34,15 @@
 
         let currentUser = null;
         let isAdmin = false;
-        let cloudTimeOffset = 0;
 
-        async function syncWithCloudTime() {
-            try {
-                const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
-                const data = await response.json();
-                cloudTimeOffset = new Date(data.datetime).getTime() - Date.now();
-            } catch (e) { cloudTimeOffset = 0; }
-            updateTimeLine();
+        // 获取精确的 UTC+3 时间
+        function getUTC3Time() {
+            const now = new Date();
+            const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+            return new Date(utc + (3 * 3600000)); 
         }
 
-        function getCorrectedUTC3Date() {
-            return new Date(Date.now() + cloudTimeOffset + (3 * 3600000));
-        }
-
+        // --- 登录/登出 ---
         window.login = () => signInWithPopup(auth, provider);
         window.logout = () => signOut(auth);
 
@@ -50,128 +51,168 @@
             const authSection = document.getElementById('authSection');
             const adminControls = document.getElementById('adminControls');
             const appContent = document.getElementById('appContent');
+            
             if (user) {
                 isAdmin = adminEmails.includes(user.email);
-                authSection.innerHTML = `<div class="flex items-center gap-2 bg-slate-800 p-1 rounded-full pr-3 border border-slate-700 shadow-lg"><img src="${user.photoURL}" class="w-8 h-8 rounded-full border border-blue-500"><div class="flex flex-col text-left"><span class="text-[10px] font-bold text-white leading-tight">${user.displayName}</span><span class="text-[9px] text-blue-400 font-black">${isAdmin ? 'ADMIN' : 'USER'}</span></div><button onclick="logout()" class="ml-2 text-slate-500 hover:text-red-400"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg></button></div>`;
+                console.log("Login Email:", user.email, "isAdmin:", isAdmin);
+
+                authSection.innerHTML = `
+                    <div class="flex items-center gap-2 bg-slate-800 p-1 pr-3 rounded-full border border-slate-700">
+                        <img src="${user.photoURL}" class="w-8 h-8 rounded-full border-2 border-blue-500">
+                        <div class="flex flex-col text-left">
+                            <span class="text-[10px] font-bold text-white leading-none">${user.displayName}</span>
+                            <span class="text-[9px] text-blue-400 font-black tracking-tighter uppercase">${isAdmin ? 'ADMIN (UTC+3)' : 'USER'}</span>
+                        </div>
+                        <button onclick="logout()" class="ml-2 text-[10px] text-slate-400 hover:text-red-400 transition">退出</button>
+                    </div>`;
+                
                 appContent.classList.remove('opacity-20', 'pointer-events-none');
-                if (isAdmin) adminControls.classList.remove('hidden');
+                
+                // 核心修复：根据身份切换管理员控制栏的显示状态
+                if (isAdmin) {
+                    adminControls.style.display = 'flex'; // 强制使用 flex 显示
+                } else {
+                    adminControls.style.display = 'none';
+                }
             } else {
-                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 px-6 py-2 rounded-xl text-sm font-bold shadow-lg">Google Login</button>`;
+                isAdmin = false;
+                authSection.innerHTML = `<button onclick="login()" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-xl text-sm font-bold shadow-xl">Google 登录</button>`;
                 appContent.classList.add('opacity-20', 'pointer-events-none');
-                adminControls.classList.add('hidden');
+                adminControls.style.display = 'none';
             }
         });
 
+        // --- 管理员操作 ---
         window.addDevice = async () => {
-            const input = document.getElementById('deviceNameInput');
-            if (isAdmin && input.value.trim()) {
-                await addDoc(collection(db, "devices"), { name: input.value.trim(), bookings: {}, createdAt: Date.now() });
-                input.value = '';
+            const nameInput = document.getElementById('deviceNameInput');
+            const name = nameInput.value.trim();
+            if (isAdmin && name) {
+                try {
+                    await addDoc(collection(db, "devices"), { name, bookings: {}, createdAt: Date.now() });
+                    nameInput.value = '';
+                } catch (e) { alert("添加失败: " + e.message); }
             }
         };
 
         window.deleteDevice = async (id, name) => {
-            if (isAdmin && confirm(`Delete ${name}?`)) await deleteDoc(doc(db, "devices", id));
+            if (isAdmin && confirm(`管理员警告：确定要删除 [${name}] 吗？`)) {
+                await deleteDoc(doc(db, "devices", id));
+            }
         };
 
+        // --- 预约操作 ---
         window.handleCellClick = async (deviceId, slotIndex, currentBooking) => {
             if (!currentUser) return;
             const deviceRef = doc(db, "devices", deviceId);
+            
             if (!currentBooking) {
                 const updates = {};
-                updates[`bookings.${slotIndex}`] = { uid: currentUser.uid, userName: currentUser.displayName };
+                updates[`bookings.${slotIndex}`] = {
+                    uid: currentUser.uid,
+                    userName: currentUser.displayName,
+                    time: getUTC3Time().getTime()
+                };
                 await updateDoc(deviceRef, updates);
             } else if (currentBooking.uid === currentUser.uid || isAdmin) {
-                if (confirm("Cancel this booking?")) {
+                const msg = (isAdmin && currentBooking.uid !== currentUser.uid) ? `管理员：强制取消 ${currentBooking.userName} 的预约？` : "确认取消预约？";
+                if (confirm(msg)) {
                     const updates = {};
                     updates[`bookings.${slotIndex}`] = null;
                     await updateDoc(deviceRef, updates);
                 }
+            } else {
+                alert(`该时段已被 ${currentBooking.userName} 预约`);
             }
         };
 
+        // --- 实时数据监听 ---
         const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
         const getHashColor = (name) => colors[Math.abs(name.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
 
-        onSnapshot(query(collection(db, "devices"), orderBy("createdAt", "asc")), (snapshot) => {
+        const q = query(collection(db, "devices"), orderBy("createdAt", "asc"));
+        onSnapshot(q, (snapshot) => {
             const list = document.getElementById('deviceList');
             list.innerHTML = '<div id="currentTimeLine" class="now-indicator"></div>';
+            
             snapshot.forEach((doc) => {
                 const device = doc.data();
                 const deviceId = doc.id;
                 let cells = '';
-                for(let i=0; i<96; i++) {
+                for(let i=0; i<48; i++) {
                     const booking = (device.bookings && device.bookings[i]) ? device.bookings[i] : null;
-                    cells += `<div class="hour-cell ${i===48 ? 'border-l-4 border-l-slate-400' : ''}" style="${booking ? `background-color: ${getHashColor(booking.userName)};` : ''}" onclick="handleCellClick('${deviceId}', ${i}, ${booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null'})">${booking ? `<span class="text-[8px] font-bold text-white">${booking.userName[0]}</span>` : ''}</div>`;
+                    const style = booking ? `background-color: ${getHashColor(booking.userName)};` : '';
+                    const bookingData = booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null';
+                    cells += `<div class="hour-cell" style="${style}" onclick="handleCellClick('${deviceId}', ${i}, ${bookingData})">${booking ? booking.userName[0] : ''}</div>`;
                 }
+
                 const row = document.createElement('div');
-                row.className = "flex items-stretch border-b border-slate-100 group hover:bg-slate-50 transition-colors bg-white";
-                row.innerHTML = `<div class="w-48 flex-shrink-0 flex items-center p-3 sticky left-0 bg-white z-10 border-r shadow-sm font-bold text-slate-700 text-xs truncate">
-                    ${isAdmin ? `<button onclick="deleteDevice('${deviceId}', '${device.name}')" class="mr-2 text-slate-300 hover:text-red-500"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
-                    <span class="truncate">${device.name}</span></div><div class="flex-grow timeline-grid">${cells}</div>`;
+                row.className = "flex items-center group mb-4 hover:bg-slate-50 rounded-lg p-1 transition";
+                row.innerHTML = `
+                    <div class="w-44 flex-shrink-0 flex items-center pr-2">
+                        ${isAdmin ? `<button onclick="deleteDevice('${deviceId}', '${device.name}')" class="p-1 mr-2 text-slate-300 hover:text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
+                        <span class="text-xs font-bold text-slate-700 truncate">${device.name}</span>
+                    </div>
+                    <div class="flex-grow timeline-grid bg-white border border-slate-200 rounded overflow-hidden relative">${cells}</div>
+                `;
                 list.appendChild(row);
             });
             updateTimeLine();
         });
 
         function updateTimeLine() {
-            const utc3 = getCorrectedUTC3Date();
+            const utc3 = getUTC3Time();
             const totalMinutes = utc3.getHours() * 60 + utc3.getMinutes();
-            const percentage = (totalMinutes / 2880) * 100;
+            const percentage = (totalMinutes / 1440) * 100;
             const line = document.getElementById('currentTimeLine');
-            if(line) line.style.left = `calc(12rem + ${percentage}%)`;
+            if(line) line.style.left = `calc(11rem + ${percentage}%)`; // 11rem = w-44
         }
-        syncWithCloudTime();
         setInterval(updateTimeLine, 10000);
     </script>
     <style>
-        /* 核心布局修复：使用 flex-shrink 防止塌缩 */
-        .timeline-grid { display: grid; grid-template-columns: repeat(96, 1fr); min-width: 3200px; flex-shrink: 0; }
-        .hour-cell { border-right: 1px solid #f1f5f9; height: 50px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-        .now-indicator { position: absolute; top: 0; bottom: 0; width: 3px; background: #ef4444; z-index: 30; pointer-events: none; }
-        .sticky-col { position: sticky; left: 0; background: #fff; z-index: 20; border-right: 2px solid #e2e8f0; }
-        ::-webkit-scrollbar { height: 12px; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; border: 3px solid #fff; }
+        .timeline-grid { display: grid; grid-template-columns: repeat(48, 1fr); min-width: 900px; }
+        .hour-cell { border-right: 1px solid #f1f5f9; height: 42px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; color: white; transition: 0.2s; }
+        .hour-cell:hover { background-color: #f1f5f9; transform: scale(1.02); z-index: 10; }
+        .now-indicator { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 20; pointer-events: none; filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.5)); }
     </style>
 </head>
-<body class="bg-slate-100 min-h-screen">
-    <div class="p-4 lg:p-10 max-w-[2000px] mx-auto">
-        <nav class="bg-slate-900 rounded-3xl p-6 shadow-2xl flex justify-between items-center mb-8 border-b-4 border-blue-600">
-            <div class="flex items-center gap-6 text-white">
-                <h1 class="text-2xl font-black italic tracking-tighter uppercase">Sino <span class="text-blue-500">Cloud</span></h1>
+<body class="bg-slate-50 min-h-screen">
+    <div class="max-w-7xl mx-auto p-4 lg:p-10">
+        <nav class="bg-slate-900 rounded-[2rem] p-6 shadow-2xl flex flex-wrap justify-between items-center mb-8 border-b-4 border-blue-600">
+            <div class="flex items-center gap-6">
+                <div class="text-white">
+                    <h1 class="text-2xl font-black italic tracking-tighter uppercase">Sino <span class="text-blue-500">Cloud</span></h1>
+                    <div class="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">UTC+03:00 Service</div>
+                </div>
                 <div id="authSection"></div>
             </div>
-            <div id="adminControls" class="hidden flex gap-2">
-                <input id="deviceNameInput" type="text" placeholder="Device..." class="bg-slate-800 text-white text-xs rounded-xl px-4 py-2 border-none outline-none w-44">
-                <button onclick="addDevice()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-6 py-2 rounded-xl">ADD</button>
+
+            <div id="adminControls" style="display: none;" class="gap-2">
+                <input id="deviceNameInput" type="text" placeholder="管理：输入新设备..." class="bg-slate-800 text-white text-xs rounded-xl px-4 py-2 border-none focus:ring-1 focus:ring-blue-500 outline-none w-44">
+                <button onclick="addDevice()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-5 py-2 rounded-xl transition shadow-lg">添加</button>
             </div>
         </nav>
 
-        <div id="appContent" class="bg-white rounded-[2rem] shadow-xl border border-slate-200 overflow-hidden opacity-20 pointer-events-none transition-opacity">
+        <div id="appContent" class="bg-white rounded-[2.5rem] p-6 lg:p-10 shadow-sm border border-slate-200 overflow-hidden opacity-20 pointer-events-none transition-all duration-500">
             <div class="overflow-x-auto">
-                <div class="flex border-b-2 border-slate-200 bg-slate-50">
-                    <div class="w-48 flex-shrink-0 sticky-col flex items-center justify-center font-bold text-slate-400 text-[10px] tracking-widest py-4">DEVICES</div>
+                <div class="flex mb-4 border-b border-slate-100 pb-2">
+                    <div class="w-44 flex-shrink-0 text-slate-400 text-[10px] font-bold uppercase pl-2">Device Name</div>
                     <div class="flex-grow">
-                        <div class="flex text-[10px] font-black uppercase">
-                            <div class="w-[1600px] flex-shrink-0 border-r-4 border-slate-300">
-                                <div class="py-2 pl-4 text-blue-600 bg-blue-100/30">TODAY - Day 1</div>
-                                <div class="grid grid-cols-48 border-t border-slate-200">
-                                    <script>for(let i=0; i<24; i++) document.write(`<div class="col-span-2 border-l border-slate-200 pl-1 py-2 font-mono">${i}:00</div>`);</script>
-                                </div>
-                            </div>
-                            <div class="w-[1600px] flex-shrink-0">
-                                <div class="py-2 pl-4 text-emerald-600 bg-emerald-100/30">TOMORROW - Day 2</div>
-                                <div class="grid grid-cols-48 border-t border-slate-200">
-                                    <script>for(let i=0; i<24; i++) document.write(`<div class="col-span-2 border-l border-slate-200 pl-1 py-2 font-mono">${i}:00</div>`);</script>
-                                </div>
-                            </div>
+                        <div class="timeline-grid text-[9px] text-slate-400 font-bold">
+                            <script>
+                                for(let i=0; i<24; i++) {
+                                    document.write(`<div class="col-span-2 text-left pl-1 border-l border-slate-100">${i}:00</div>`);
+                                }
+                            </script>
                         </div>
                     </div>
                 </div>
                 <div id="deviceList" class="relative"></div>
             </div>
         </div>
-        <p class="text-center mt-6 text-slate-400 text-[9px] font-bold uppercase tracking-[0.2em] italic underline underline-offset-4">Precision Global Time (UTC+3) Calibration</p>
+        
+        <footer class="mt-8 text-center text-slate-400 text-[10px] font-medium italic italic">
+            * 仅管理员可管理设备清单 | 使用者登录后可点击 30min 网格进行预约
+        </footer>
     </div>
 </body>
 </html>
