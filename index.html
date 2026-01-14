@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sino Hub - 48H Sync Pro</title>
+    <title>Sino Hub - Cloud Sync Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
@@ -28,13 +28,28 @@
 
         let currentUser = null;
         let isAdmin = false;
+        let cloudTimeOffset = 0; // 线上时间与本地时间的毫秒差
 
-        // 【高精度修复】彻底消除手机/电脑时区差异
-        function getUTC3Date() {
-            const d = new Date();
-            // 转化为绝对 UTC 时间戳，再加上 3 小时偏移
-            const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-            return new Date(utc + (3 * 3600000));
+        // 【核心】从线上获取标准时间
+        async function syncWithCloudTime() {
+            try {
+                const response = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC');
+                const data = await response.json();
+                const serverTime = new Date(data.datetime).getTime();
+                const localTime = Date.now();
+                cloudTimeOffset = serverTime - localTime;
+                console.log("云端同步成功，时间偏移量(ms):", cloudTimeOffset);
+            } catch (e) {
+                console.error("云端时间同步失败，回退至本地计算:", e);
+                cloudTimeOffset = 0;
+            }
+            updateTimeLine();
+        }
+
+        // 基于线上偏移量计算 UTC+3 时间
+        function getCorrectedUTC3Date() {
+            const correctedNow = Date.now() + cloudTimeOffset; // 线上标准UTC时间
+            return new Date(correctedNow + (3 * 3600000)); // 转换成 UTC+3
         }
 
         window.login = () => signInWithPopup(auth, provider);
@@ -50,11 +65,9 @@
                 authSection.innerHTML = `
                     <div class="flex items-center gap-2 bg-slate-800 p-1.5 pr-4 rounded-full border border-slate-700 shadow-xl">
                         <img src="${user.photoURL}" class="w-8 h-8 rounded-full border-2 border-blue-500">
-                        <div class="flex flex-col"><span class="text-[10px] font-bold text-white leading-tight">${user.displayName}</span>
+                        <div class="flex flex-col text-left"><span class="text-[10px] font-bold text-white leading-tight">${user.displayName}</span>
                         <span class="text-[9px] text-blue-400 font-black">${isAdmin ? 'ADMIN' : 'USER'}</span></div>
-                        <button onclick="logout()" class="ml-2 text-slate-500 hover:text-red-400">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        </button>
+                        <button onclick="logout()" class="ml-2 text-slate-500 hover:text-red-400"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg></button>
                     </div>`;
                 appContent.classList.remove('opacity-20', 'pointer-events-none');
                 if (isAdmin) adminControls.style.display = 'flex';
@@ -65,7 +78,6 @@
             }
         });
 
-        // 预约与设备操作逻辑 (保持上一版)
         window.addDevice = async () => {
             const input = document.getElementById('deviceNameInput');
             if (isAdmin && input.value.trim()) {
@@ -83,10 +95,10 @@
             const deviceRef = doc(db, "devices", deviceId);
             if (!currentBooking) {
                 const updates = {};
-                updates[`bookings.${slotIndex}`] = { uid: currentUser.uid, userName: currentUser.displayName, email: currentUser.email };
+                updates[`bookings.${slotIndex}`] = { uid: currentUser.uid, userName: currentUser.displayName };
                 await updateDoc(deviceRef, updates);
             } else if (currentBooking.uid === currentUser.uid || isAdmin) {
-                if (confirm("Cancel this reservation?")) {
+                if (confirm("Cancel this?")) {
                     const updates = {};
                     updates[`bookings.${slotIndex}`] = null;
                     await updateDoc(deviceRef, updates);
@@ -94,7 +106,6 @@
             }
         };
 
-        // --- 渲染逻辑 ---
         const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
         const getHashColor = (name) => colors[Math.abs(name.split('').reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0)) % colors.length];
 
@@ -107,18 +118,17 @@
                 let cells = '';
                 for(let i=0; i<96; i++) {
                     const booking = (device.bookings && device.bookings[i]) ? device.bookings[i] : null;
-                    const isNewDay = i === 48;
                     const style = booking ? `background-color: ${getHashColor(booking.userName)};` : '';
-                    cells += `<div class="hour-cell ${isNewDay ? 'border-l-4 border-l-slate-400' : ''}" 
+                    cells += `<div class="hour-cell ${i===48 ? 'border-l-4 border-l-slate-400' : ''}" 
                                    style="${style}" onclick="handleCellClick('${deviceId}', ${i}, ${booking ? JSON.stringify(booking).replace(/"/g, '&quot;') : 'null'})">
                                    ${booking ? `<span class="text-[8px] font-bold">${booking.userName[0]}</span>` : ''}
                               </div>`;
                 }
                 const row = document.createElement('div');
-                row.className = "flex items-center border-b border-slate-100 group hover:bg-blue-50/50 transition-colors";
+                row.className = "flex items-center border-b border-slate-100 group odd:bg-white even:bg-slate-50/30 hover:bg-blue-50/50 transition-colors";
                 row.innerHTML = `
-                    <div class="w-48 flex-shrink-0 flex items-center p-3 sticky left-0 bg-white z-10 border-r shadow-sm font-black text-slate-700">
-                        ${isAdmin ? `<button onclick="deleteDevice('${deviceId}', '${device.name}')" class="mr-2 text-slate-300 hover:text-red-500 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
+                    <div class="w-48 flex-shrink-0 flex items-center p-3 sticky left-0 bg-inherit z-10 border-r shadow-sm font-black text-slate-700">
+                        ${isAdmin ? `<button onclick="deleteDevice('${deviceId}', '${device.name}')" class="mr-2 text-slate-300 hover:text-red-500 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>` : ''}
                         <span class="truncate">${device.name}</span>
                     </div>
                     <div class="flex-grow timeline-grid">${cells}</div>`;
@@ -127,62 +137,64 @@
             updateTimeLine();
         });
 
-        // 【核心】强制对齐指针算法
         function updateTimeLine() {
-            const utc3 = getUTC3Date();
+            const utc3 = getCorrectedUTC3Date();
             const totalMinutesToday = utc3.getHours() * 60 + utc3.getMinutes();
-            // 总格数是 96格 (48H)，今天占前 48格
-            // 每一分钟占据的宽度百分比：100% / 2880分钟 (48小时)
+            // 48小时总长 = 2880分钟
             const percentage = (totalMinutesToday / 2880) * 100;
             const line = document.getElementById('currentTimeLine');
-            if(line) {
-                // 12rem 是左侧 w-48 的固定宽度
-                line.style.left = `calc(12rem + ${percentage}%)`;
-            }
+            if(line) line.style.left = `calc(12rem + ${percentage}%)`;
         }
+
+        // 初始化：请求云端时间，并启动定时器
+        syncWithCloudTime();
         setInterval(updateTimeLine, 10000);
     </script>
     <style>
-        .timeline-grid { display: grid; grid-template-columns: repeat(96, 1fr); min-width: 3000px; }
-        .hour-cell { border-right: 1px solid #f1f5f9; height: 50px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: white; transition: 0.1s; }
-        .hour-cell:hover { background-color: #f8fafc; transform: scaleY(1.05); z-index: 5; }
-        .now-indicator { position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 30; pointer-events: none; filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.8)); }
-        ::-webkit-scrollbar { height: 8px; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .timeline-grid { display: grid; grid-template-columns: repeat(96, 1fr); min-width: 3200px; }
+        .hour-cell { border-right: 1px solid #f1f5f9; height: 50px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: white; transition: 0.1s; border-bottom: 1px solid #f8fafc; }
+        .hour-cell:hover { background-color: #f1f5f9; transform: scaleY(1.05); z-index: 5; }
+        .now-indicator { position: absolute; top: 0; bottom: 0; width: 3px; background: #ef4444; z-index: 30; pointer-events: none; filter: drop-shadow(0 0 3px rgba(239, 68, 68, 0.8)); }
+        ::-webkit-scrollbar { height: 10px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 5px; }
+        ::-webkit-scrollbar-track { background: #f8fafc; }
     </style>
 </head>
-<body class="bg-slate-50 font-sans antialiased">
-    <div class="p-4 lg:p-10 max-w-[1920px] mx-auto">
-        <nav class="bg-slate-900 rounded-[2rem] p-6 shadow-2xl flex flex-wrap justify-between items-center mb-8 border-b-4 border-blue-600">
+<body class="bg-[#f0f4f8] font-sans antialiased text-slate-800">
+    <div class="p-4 lg:p-8 max-w-[2000px] mx-auto">
+        <nav class="bg-slate-900 rounded-[2.5rem] p-6 shadow-2xl flex flex-wrap justify-between items-center mb-8 border-b-4 border-blue-600">
             <div class="flex items-center gap-6">
                 <div class="text-white">
-                    <h1 class="text-2xl font-black italic tracking-tighter">SINO <span class="text-blue-500">SYNC-HUB</span></h1>
-                    <div class="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">Status: Online (UTC+3)</div>
+                    <h1 class="text-2xl font-black italic tracking-tighter">SINO <span class="text-blue-500">CLOUD</span></h1>
+                    <div class="flex items-center gap-2 mt-1">
+                        <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                        <span class="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Global Cloud Sync (UTC+3)</span>
+                    </div>
                 </div>
                 <div id="authSection"></div>
             </div>
             <div id="adminControls" style="display: none;" class="gap-2">
-                <input id="deviceNameInput" type="text" placeholder="Add device..." class="bg-slate-800 text-white text-xs rounded-xl px-4 py-2 border-none focus:ring-1 focus:ring-blue-500 outline-none w-44">
-                <button onclick="addDevice()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-5 py-2 rounded-xl transition-all">ADD</button>
+                <input id="deviceNameInput" type="text" placeholder="Device Name..." class="bg-slate-800 text-white text-xs rounded-xl px-4 py-2 border-none outline-none w-44 focus:ring-1 focus:ring-blue-500">
+                <button onclick="addDevice()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-6 py-2 rounded-xl transition-all">ADD</button>
             </div>
         </nav>
 
-        <div id="appContent" class="bg-white rounded-[2.5rem] p-6 shadow-sm border border-slate-200 overflow-hidden opacity-20 pointer-events-none transition-all duration-500">
+        <div id="appContent" class="bg-white rounded-[3rem] p-6 shadow-xl border border-slate-200 overflow-hidden opacity-20 pointer-events-none transition-opacity duration-500">
             <div class="overflow-x-auto">
-                <div class="flex border-b-2 border-slate-100 bg-slate-50">
-                    <div class="w-48 flex-shrink-0 text-slate-400 text-[10px] font-bold uppercase flex items-center justify-center border-r sticky left-0 bg-slate-50 z-20">Equipment</div>
+                <div class="flex border-b-2 border-slate-100 bg-slate-50/50">
+                    <div class="w-48 flex-shrink-0 flex items-center justify-center font-black text-slate-400 text-xs border-r sticky left-0 bg-slate-50 z-20">DEVICES</div>
                     <div class="flex-grow">
-                        <div class="flex text-[9px] font-black text-slate-400">
-                            <div class="w-[1500px] flex-shrink-0 border-r-4 border-slate-300">
-                                <div class="py-2 pl-4 text-blue-600 bg-blue-50/50">TODAY</div>
+                        <div class="flex text-[9px] font-black uppercase tracking-tighter">
+                            <div class="w-[1600px] flex-shrink-0 border-r-4 border-slate-300">
+                                <div class="py-2 pl-4 text-blue-600 bg-blue-100/30">TODAY - Day 1</div>
                                 <div class="grid grid-cols-48">
-                                    <script>for(let i=0; i<24; i++) document.write(`<div class="col-span-2 border-l pl-1 py-1">${i}:00</div>`);</script>
+                                    <script>for(let i=0; i<24; i++) document.write(`<div class="col-span-2 border-l border-slate-200 pl-1 py-2">${i}:00</div>`);</script>
                                 </div>
                             </div>
-                            <div class="w-[1500px] flex-shrink-0">
-                                <div class="py-2 pl-4 text-emerald-600 bg-emerald-50/50">TOMORROW</div>
+                            <div class="w-[1600px] flex-shrink-0">
+                                <div class="py-2 pl-4 text-emerald-600 bg-emerald-100/30">TOMORROW - Day 2</div>
                                 <div class="grid grid-cols-48">
-                                    <script>for(let i=0; i<24; i++) document.write(`<div class="col-span-2 border-l pl-1 py-1">${i}:00</div>`);</script>
+                                    <script>for(let i=0; i<24; i++) document.write(`<div class="col-span-2 border-l border-slate-200 pl-1 py-2">${i}:00</div>`);</script>
                                 </div>
                             </div>
                         </div>
@@ -191,6 +203,7 @@
                 <div id="deviceList" class="relative"></div>
             </div>
         </div>
+        <p class="text-center mt-6 text-slate-400 text-[10px] font-bold uppercase tracking-widest italic">Precision time calibrated by WorldTimeAPI</p>
     </div>
 </body>
 </html>
